@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>pxmemo</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- SortableJS for drag-and-drop -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.6/Sortable.min.js"></script>
+</head>
+<body>
+    <header>
+        <h1>pxmemo</h1>
+        <div class="upload-area" id="upload-area">
+            <p>Drop images here or <label for="file-input" class="file-label">browse</label></p>
+            <input type="file" id="file-input" multiple accept="image/*" hidden>
+        </div>
+    </header>
+
+    <main>
+        <div class="timeline" id="timeline">
+            {% for img in images %}
+            <div class="timeline-card" data-id="{{ img.id }}">
+                <div class="card-image">
+                    <img src="/thumbnails/{{ img.filename }}" alt="{{ img.original_name }}" loading="lazy">
+                    <button class="delete-btn" onclick="deleteImage({{ img.id }})" title="Remove">&times;</button>
+                </div>
+                <div class="card-info">
+                    <div class="card-name" title="{{ img.original_name }}">{{ img.original_name }}</div>
+                    <div class="card-date">
+                        <input type="text"
+                               value="{{ img.anchor_date or '' }}"
+                               placeholder="YYYY or YYYY-MM-DD"
+                               onchange="setAnchor({{ img.id }}, this.value)"
+                               onkeydown="if(event.key==='Enter'){this.blur()}"
+                               class="date-input {% if img.anchor_date %}anchor{% endif %}"
+                               title="{% if img.anchor_date %}Anchor date (click to change){% else %}Set date: 2024, 2024-06, or 2024-06-15{% endif %}">
+                        {% if img.computed_date and not img.anchor_date %}
+                        <span class="computed-date">{{ img.computed_date }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        {% if not images %}
+        <div class="empty-state">
+            <p>Upload some images to get started.</p>
+        </div>
+        {% endif %}
+    </main>
+
+    <script src="/static/timeline.js"></script>
+</body>
+</html>
