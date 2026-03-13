@@ -316,28 +316,27 @@ function initSortable() {
     });
 }
 
-initSortable();
-
-
 // --- Anchor dates ---
 function isValidDate(str) {
     if (!str) return true;
     return /^\d{4}$/.test(str) || /^\d{4}-\d{2}$/.test(str) || /^\d{4}-\d{2}-\d{2}$/.test(str);
 }
 
-async function setAnchor(imageId, dateValue) {
+async function setAnchor(imageId, dateValue, deferResort = false) {
     dateValue = dateValue.trim();
     if (!isValidDate(dateValue)) {
         alert('Enter a date as YYYY, YYYY-MM, or YYYY-MM-DD');
         refreshTimeline();
         return;
     }
+    // Always defer resort so the card stays in place for stamping
     await fetch(`/anchor/${imageId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date: dateValue || null }),
+        body: JSON.stringify({ date: dateValue || null, defer_resort: true }),
     });
     refreshTimeline();
+    startResortCountdown();
 }
 
 
@@ -348,10 +347,197 @@ async function deleteImage(imageId) {
 }
 
 
+// --- Date stamp mode ---
+let stampDate = null;
+
+function buildStampCursor(date) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const font = 'bold 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.font = font;
+    const metrics = ctx.measureText(date);
+    const w = Math.ceil(metrics.width) + 12;
+    const h = 22;
+    canvas.width = w;
+    canvas.height = h;
+    ctx.font = font;
+    ctx.fillStyle = 'rgba(233, 69, 96, 0.9)';
+    ctx.beginPath();
+    ctx.roundRect(0, 0, w, h, 4);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(date, 6, h / 2);
+    return `url(${canvas.toDataURL()}) ${Math.floor(w/2)} ${Math.floor(h/2)}, pointer`;
+}
+
+function enterStampMode(date) {
+    stampDate = date;
+    document.body.classList.add('stamp-mode');
+    document.documentElement.style.setProperty('--stamp-cursor', buildStampCursor(date));
+    let banner = document.getElementById('stamp-banner');
+    if (!banner) {
+        banner = document.createElement('div');
+        banner.id = 'stamp-banner';
+        document.body.appendChild(banner);
+    }
+    banner.innerHTML = `Stamping: <strong>${date}</strong> — click images to apply, <span class="stamp-exit">click here or press Esc to exit</span>`;
+    banner.style.display = 'flex';
+    banner.onclick = exitStampMode;
+}
+
+// --- Deferred resort with countdown ---
+let resortTimer = null;
+let resortCountdown = 0;
+let countdownInterval = null;
+const RESORT_DELAY = 15;
+
+function getResortPill() {
+    let pill = document.getElementById('resort-pill');
+    if (!pill) {
+        pill = document.createElement('div');
+        pill.id = 'resort-pill';
+        document.body.appendChild(pill);
+    }
+    return pill;
+}
+
+function updateResortPill() {
+    const pill = getResortPill();
+    if (resortCountdown > 0) {
+        pill.textContent = `sorting in ${resortCountdown}s — click to sort now`;
+        pill.style.display = 'block';
+        pill.onclick = fireResortNow;
+    } else {
+        pill.style.display = 'none';
+    }
+}
+
+async function fireResortNow() {
+    cancelResortCountdown();
+    updateResortPill();
+    await fetch('/resort', { method: 'POST' });
+    await animatedRefresh();
+}
+
+function startResortCountdown() {
+    clearTimeout(resortTimer);
+    clearInterval(countdownInterval);
+    resortCountdown = RESORT_DELAY;
+    updateResortPill();
+    countdownInterval = setInterval(() => {
+        resortCountdown--;
+        updateResortPill();
+        if (resortCountdown <= 0) clearInterval(countdownInterval);
+    }, 1000);
+    resortTimer = setTimeout(async () => {
+        clearInterval(countdownInterval);
+        resortCountdown = 0;
+        updateResortPill();
+        await fetch('/resort', { method: 'POST' });
+        await animatedRefresh();
+    }, RESORT_DELAY * 1000);
+}
+
+function cancelResortCountdown() {
+    clearTimeout(resortTimer);
+    clearInterval(countdownInterval);
+    resortTimer = null;
+    resortCountdown = 0;
+}
+
+function exitStampMode() {
+    stampDate = null;
+    document.body.classList.remove('stamp-mode');
+    document.documentElement.style.removeProperty('--stamp-cursor');
+    const banner = document.getElementById('stamp-banner');
+    if (banner) banner.style.display = 'none';
+    // Resort countdown keeps running independently via the pill
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && stampDate) exitStampMode();
+});
+
+function handleStampClick(e, imageId) {
+    if (!stampDate) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchor(imageId, stampDate, true);  // defer resort
+    startResortCountdown();
+}
+
+function activateStamp(e, date) {
+    e.stopPropagation();
+    if (stampDate === date) {
+        exitStampMode();
+    } else {
+        enterStampMode(date);
+    }
+}
+
+
+// --- FLIP animation for resort ---
+async function animatedRefresh() {
+    // FIRST: record current positions
+    const oldCards = timeline.querySelectorAll('.timeline-card');
+    const firstPositions = {};
+    oldCards.forEach(card => {
+        const id = card.dataset.id;
+        const rect = card.getBoundingClientRect();
+        firstPositions[id] = { x: rect.left, y: rect.top };
+    });
+
+    // Fetch new data and rebuild DOM
+    const resp = await fetch('/timeline-data');
+    const images = await resp.json();
+
+    currentImages = images.map(img => ({
+        id: img.id,
+        anchor_date: img.anchor_date
+    }));
+
+    const empty = document.querySelector('.empty-state');
+    if (empty) empty.remove();
+
+    renderGroupedTimeline(images);
+
+    // LAST: record new positions and INVERT + PLAY
+    const newCards = timeline.querySelectorAll('.timeline-card');
+    newCards.forEach(card => {
+        const id = card.dataset.id;
+        const newRect = card.getBoundingClientRect();
+        const oldPos = firstPositions[id];
+        if (!oldPos) return;
+
+        const dx = oldPos.x - newRect.left;
+        const dy = oldPos.y - newRect.top;
+        if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return;
+
+        card.style.transform = `translate(${dx}px, ${dy}px)`;
+        card.style.transition = 'none';
+        // Force reflow
+        card.offsetHeight;
+        card.style.transition = 'transform 0.5s ease';
+        card.style.transform = '';
+        card.addEventListener('transitionend', () => {
+            card.style.transition = '';
+        }, { once: true });
+    });
+
+    initSortableFlat();
+    setupHoverHighlights();
+}
+
+
 // --- Render a card's HTML ---
 function renderCard(img, rangeHtml) {
+    const dateVal = img.anchor_date || img.computed_date || '';
+    const stampBtn = dateVal
+        ? `<button class="stamp-btn" onclick="activateStamp(event, '${dateVal}')" title="Stamp this date onto other images">&#8633;</button>`
+        : '';
     return `
-        <div class="timeline-card" data-id="${img.id}">
+        <div class="timeline-card" data-id="${img.id}" onclick="handleStampClick(event, ${img.id})">
             <div class="card-image">
                 <img src="/thumbnails/${img.filename}" alt="${img.original_name}" loading="lazy">
                 <button class="delete-btn" onclick="deleteImage(${img.id})" title="Remove">&times;</button>
@@ -366,11 +552,121 @@ function renderCard(img, rangeHtml) {
                            onkeydown="if(event.key==='Enter'){this.blur()}"
                            class="date-input ${img.anchor_date ? 'anchor' : ''}"
                            title="${img.anchor_date ? 'Anchor date (click to change)' : 'Set date: 2024, 2024-06, or 2024-06-15'}">
+                    ${stampBtn}
                     ${img.computed_date && !img.anchor_date ? `<span class="computed-date">${img.computed_date}</span>` : ''}
                     ${rangeHtml}
                 </div>
             </div>
         </div>`;
+}
+
+
+// --- Year grouping ---
+let collapsedYears = new Set();
+
+function getYear(img) {
+    const d = img.anchor_date || img.computed_date;
+    if (!d) return null;
+    return d.substring(0, 4);
+}
+
+function groupByYear(images) {
+    const groups = [];
+    const groupMap = {};
+    images.forEach((img, idx) => {
+        const year = getYear(img);
+        const key = year || '__undated__';
+        if (!groupMap[key]) {
+            groupMap[key] = { year: year, images: [], indices: [] };
+            groups.push(groupMap[key]);
+        }
+        groupMap[key].images.push(img);
+        groupMap[key].indices.push(idx);
+    });
+    return groups;
+}
+
+function buildRangeHtml(images, idx) {
+    if (images[idx].computed_date && !images[idx].anchor_date) {
+        const { prevDate, nextDate } = findBoundingAnchors(images, idx);
+        if (prevDate && nextDate) {
+            return `<span class="computed-range">${prevDate} &larr;&middot;&middot;&middot;&rarr; ${nextDate}</span>`;
+        } else if (prevDate) {
+            return `<span class="computed-range">after ${prevDate}</span>`;
+        } else if (nextDate) {
+            return `<span class="computed-range">before ${nextDate}</span>`;
+        }
+    }
+    return '';
+}
+
+function renderGroupedTimeline(images) {
+    const groups = groupByYear(images);
+    const sidebar = document.getElementById('year-sidebar');
+
+    // Build sidebar with year labels
+    sidebar.innerHTML = groups.map(g => {
+        const year = g.year || 'undated';
+        const isCollapsed = collapsedYears.has(year);
+        return `<div class="year-label ${isCollapsed ? 'collapsed' : ''}" data-year="${year}" onclick="scrollToYear('${year}')">${year}<span class="year-count"> ${g.images.length}</span></div>`;
+    }).join('');
+
+    // Build flat card list — each card tagged with its year for collapse
+    let html = '';
+    images.forEach((img, idx) => {
+        const year = getYear(img) || 'undated';
+        const isCollapsed = collapsedYears.has(year);
+        const card = renderCard(img, buildRangeHtml(images, idx));
+        if (isCollapsed) {
+            html += card.replace('class="timeline-card', `class="timeline-card year-collapsed" data-year="${year}`);
+        } else {
+            html += card.replace('data-id=', `data-year="${year}" data-id=`);
+        }
+    });
+    timeline.innerHTML = html;
+}
+
+function toggleYear(year) {
+    if (collapsedYears.has(year)) {
+        collapsedYears.delete(year);
+    } else {
+        collapsedYears.add(year);
+    }
+    // Toggle cards with matching data-year
+    timeline.querySelectorAll(`.timeline-card[data-year="${year}"]`).forEach(card => {
+        card.classList.toggle('year-collapsed');
+    });
+    const label = document.querySelector(`.year-label[data-year="${year}"]`);
+    if (label) label.classList.toggle('collapsed');
+}
+
+function scrollToYear(year) {
+    if (collapsedYears.has(year)) {
+        toggleYear(year);
+    }
+    const firstCard = timeline.querySelector(`.timeline-card[data-year="${year}"]`);
+    if (firstCard) {
+        firstCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+}
+
+function initSortableFlat() {
+    if (!timeline) return;
+    Sortable.create(timeline, {
+        animation: 200,
+        ghostClass: 'sortable-ghost',
+        chosenClass: 'sortable-chosen',
+        dragClass: 'sortable-drag',
+        onStart(evt) {
+            handleDragStart(evt);
+            document.body.classList.add('dragging');
+        },
+        onChange: handleSortChange,
+        onEnd(evt) {
+            document.body.classList.remove('dragging');
+            handleDragEnd(evt);
+        },
+    });
 }
 
 
@@ -387,6 +683,7 @@ async function refreshTimeline() {
 
     if (images.length === 0) {
         timeline.innerHTML = '';
+        document.getElementById('year-sidebar').innerHTML = '';
         const empty = document.querySelector('.empty-state');
         if (!empty) {
             const main = document.querySelector('main');
@@ -398,22 +695,12 @@ async function refreshTimeline() {
     const empty = document.querySelector('.empty-state');
     if (empty) empty.remove();
 
-    // Build HTML with range info for interpolated cards
-    timeline.innerHTML = images.map((img, idx) => {
-        let rangeHtml = '';
-        if (img.computed_date && !img.anchor_date) {
-            const { prevDate, nextDate } = findBoundingAnchors(images, idx);
-            if (prevDate && nextDate) {
-                rangeHtml = `<span class="computed-range">${prevDate} &larr;&middot;&middot;&middot;&rarr; ${nextDate}</span>`;
-            } else if (prevDate) {
-                rangeHtml = `<span class="computed-range">after ${prevDate}</span>`;
-            } else if (nextDate) {
-                rangeHtml = `<span class="computed-range">before ${nextDate}</span>`;
-            }
-        }
-        return renderCard(img, rangeHtml);
-    }).join('');
-
-    initSortable();
+    renderGroupedTimeline(images);
+    initSortableFlat();
     setupHoverHighlights();
+}
+
+// Refresh on load so JS-rendered cards (with stamp buttons) replace server-rendered ones
+if (document.querySelectorAll('.timeline-card').length > 0) {
+    refreshTimeline();
 }

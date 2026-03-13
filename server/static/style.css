@@ -55,7 +55,132 @@ h1 {
     text-decoration: underline;
 }
 
-/* Timeline */
+/* Main layout with sidebar */
+.main-layout {
+    display: flex;
+    min-height: calc(100vh - 70px);
+}
+
+/* Year sidebar */
+.year-sidebar {
+    width: 80px;
+    flex-shrink: 0;
+    background: #16213e;
+    border-right: 1px solid #0f3460;
+    padding: 1rem 0;
+    position: sticky;
+    top: 0;
+    height: calc(100vh - 70px);
+    overflow-y: auto;
+}
+
+.year-label {
+    position: relative;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #888;
+    cursor: pointer;
+    transition: color 0.15s;
+    white-space: nowrap;
+}
+
+.year-label:hover {
+    color: #e94560;
+}
+
+.year-label.active {
+    color: #e94560;
+}
+
+.year-label.collapsed {
+    opacity: 0.5;
+}
+
+/* Horizontal rule extending from year label */
+.year-label::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 50%;
+    width: 16px;
+    height: 1px;
+    background: #0f3460;
+}
+
+.year-label.active::after {
+    background: #e94560;
+}
+
+.year-label .year-count {
+    font-size: 0.6rem;
+    font-weight: 400;
+    color: #555;
+    margin-left: 2px;
+}
+
+main {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+}
+
+/* Year dividers — positioned outside flex flow so they don't break SortableJS */
+.year-divider {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    padding: 6px 0;
+    gap: 10px;
+    cursor: pointer;
+    user-select: none;
+    flex-basis: 100%;
+    pointer-events: auto;
+    order: -1;
+}
+
+.year-group-title {
+    font-size: 1rem;
+    font-weight: 300;
+    color: #e94560;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+}
+
+.year-group-count {
+    font-size: 0.7rem;
+    color: #555;
+    white-space: nowrap;
+}
+
+.year-group-toggle {
+    font-size: 0.6rem;
+    color: #555;
+    transition: transform 0.2s;
+}
+
+.year-group-toggle.collapsed {
+    transform: rotate(-90deg);
+}
+
+.year-group-hr {
+    flex: 1;
+    height: 1px;
+    background: #0f3460;
+}
+
+/* Undated divider */
+.year-divider.undated .year-group-title {
+    color: #555;
+    font-style: italic;
+}
+
+/* Collapsed cards hidden */
+.timeline-card.year-collapsed {
+    display: none;
+}
+
+/* Timeline (flat, used as fallback and for SortableJS) */
 .timeline {
     display: flex;
     flex-wrap: wrap;
@@ -83,6 +208,7 @@ h1 {
     transform: scale(1.02);
     box-shadow: 0 8px 30px rgba(233, 69, 96, 0.3);
     border-color: #e94560;
+    cursor: grabbing !important;
 }
 
 /* Ghost becomes a thin insertion bar */
@@ -108,6 +234,13 @@ h1 {
     opacity: 0.85;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
     border-color: #e94560;
+    cursor: grabbing !important;
+}
+
+/* Override cursor everywhere during drag */
+body.dragging,
+body.dragging * {
+    cursor: grabbing !important;
 }
 
 /* Date preview tooltip during drag */
@@ -177,8 +310,9 @@ h1 {
 
 .card-date {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
 }
 
 .date-input {
@@ -188,7 +322,8 @@ h1 {
     padding: 4px 6px;
     border-radius: 4px;
     font-size: 0.8rem;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     cursor: pointer;
 }
 
@@ -208,6 +343,7 @@ h1 {
     color: #53a88b;
     font-style: italic;
     padding-left: 2px;
+    width: 100%;
 }
 
 .computed-range {
@@ -215,6 +351,7 @@ h1 {
     color: #4a7a6a;
     padding-left: 2px;
     display: none;
+    width: 100%;
 }
 
 /* Show range on hover */
@@ -261,4 +398,78 @@ h1 {
     50% { transform: scaleX(1); transform-origin: left; }
     50.1% { transform: scaleX(1); transform-origin: right; }
     100% { transform: scaleX(0); transform-origin: right; }
+}
+
+/* Date stamp mode */
+.stamp-btn {
+    background: none;
+    border: 1px solid #0f3460;
+    color: #888;
+    border-radius: 4px;
+    width: 24px;
+    height: 24px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    line-height: 1;
+    padding: 0;
+    flex-shrink: 0;
+    transition: all 0.15s;
+}
+
+.stamp-btn:hover {
+    border-color: #e94560;
+    color: #e94560;
+}
+
+#stamp-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: rgba(233, 69, 96, 0.95);
+    color: #fff;
+    padding: 8px 16px;
+    font-size: 0.9rem;
+    z-index: 1001;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.stamp-exit {
+    text-decoration: underline;
+    opacity: 0.8;
+}
+
+#resort-pill {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(233, 69, 96, 0.9);
+    color: #fff;
+    padding: 8px 18px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    z-index: 1001;
+    display: none;
+    cursor: pointer;
+    white-space: nowrap;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+#resort-pill:hover {
+    background: rgba(233, 69, 96, 1);
+}
+
+body.stamp-mode .timeline-card {
+    cursor: var(--stamp-cursor, crosshair);
+}
+
+body.stamp-mode .timeline-card:hover {
+    border-color: #e94560;
+    box-shadow: 0 0 12px rgba(233, 69, 96, 0.4);
 }

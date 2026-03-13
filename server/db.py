@@ -105,15 +105,28 @@ def format_interpolated_date(dt: datetime, precision: str) -> str:
         return dt.strftime("%Y-%m-%d")
 
 
-def set_anchor_date(image_id: int, date_str: str):
+def is_precision_refinement(old_date: str, new_date: str) -> bool:
+    """Check if new_date is just a more precise version of old_date.
+    e.g. '1971' -> '1971-02' or '1971-02' -> '1971-02-15'."""
+    if not old_date:
+        return False
+    return new_date.startswith(old_date) and len(new_date) > len(old_date)
+
+
+def set_anchor_date(image_id: int, date_str: str, resort: bool = True):
     conn = get_db()
+    old = conn.execute("SELECT anchor_date FROM images WHERE id = ?", (image_id,)).fetchone()
+    old_date = old["anchor_date"] if old else None
     conn.execute(
         "UPDATE images SET anchor_date = ?, computed_date = ? WHERE id = ?",
         (date_str, date_str, image_id),
     )
     conn.commit()
     conn.close()
-    resort_by_date()
+    if not resort or is_precision_refinement(old_date, date_str):
+        recompute_dates()  # recalc neighbors but don't move this image
+    else:
+        resort_by_date()
 
 
 def clear_anchor_date(image_id: int):

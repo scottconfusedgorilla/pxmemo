@@ -8,7 +8,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from contextlib import asynccontextmanager
-from PIL import Image
+from PIL import Image, ImageOps
 
 import db
 
@@ -51,6 +51,7 @@ async def upload_images(files: list[UploadFile] = File(...)):
         temp_path.write_bytes(data)
         try:
             img = Image.open(temp_path)
+            img = ImageOps.exif_transpose(img)
             img.thumbnail((THUMB_MAX, THUMB_MAX))
             img.save(thumb_path)
             temp_path.unlink()
@@ -78,10 +79,17 @@ async def reorder(request: Request):
 async def set_anchor(image_id: int, request: Request):
     data = await request.json()
     date_str = data.get("date")
+    defer_resort = data.get("defer_resort", False)
     if date_str:
-        db.set_anchor_date(image_id, date_str)
+        db.set_anchor_date(image_id, date_str, resort=not defer_resort)
     else:
         db.clear_anchor_date(image_id)
+    return JSONResponse({"status": "ok"})
+
+
+@app.post("/resort")
+async def resort():
+    db.resort_by_date()
     return JSONResponse({"status": "ok"})
 
 
