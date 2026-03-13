@@ -6,3 +6,7 @@ __pycache__/
 server/uploads/
 server/thumbnails/
 .venv/
+client/build/
+client/dist/
+client/*.spec
+client/*.log

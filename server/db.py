@@ -248,6 +248,13 @@ def recompute_dates():
     conn.close()
 
 
+def get_image_by_name(original_name: str) -> dict | None:
+    conn = get_db()
+    row = conn.execute("SELECT * FROM images WHERE original_name = ?", (original_name,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def delete_image(image_id: int):
     conn = get_db()
     conn.execute("DELETE FROM images WHERE id = ?", (image_id,))

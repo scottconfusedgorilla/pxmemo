@@ -106,3 +106,19 @@ async def delete_image(image_id: int):
 @app.get("/timeline-data")
 async def timeline_data():
     return db.get_all_images()
+
+
+@app.post("/lookup")
+async def lookup(request: Request):
+    """Look up metadata for images by original filename. Returns {filename: {date, description}}."""
+    filenames = await request.json()
+    result = {}
+    for name in filenames:
+        img = db.get_image_by_name(name)
+        if img:
+            date = img["anchor_date"] or img["computed_date"]
+            result[name] = {
+                "date": date,
+                "description": img.get("description"),
+            }
+    return JSONResponse(result)
