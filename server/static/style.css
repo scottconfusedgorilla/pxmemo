@@ -85,8 +85,46 @@ h1 {
     border-color: #e94560;
 }
 
+/* Ghost becomes a thin insertion bar */
 .timeline-card.sortable-ghost {
-    opacity: 0.3;
+    width: 6px !important;
+    min-width: 6px !important;
+    max-width: 6px !important;
+    background: #e94560;
+    border: none;
+    border-radius: 3px;
+    overflow: hidden;
+    opacity: 1;
+    padding: 0;
+    align-self: stretch;
+}
+
+.timeline-card.sortable-ghost > * {
+    display: none !important;
+}
+
+/* The dragged card */
+.timeline-card.sortable-drag {
+    opacity: 0.85;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    border-color: #e94560;
+}
+
+/* Date preview tooltip during drag */
+.drag-date-preview {
+    position: fixed;
+    background: rgba(233, 69, 96, 0.9);
+    color: #fff;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    pointer-events: none;
+    z-index: 1000;
+    white-space: nowrap;
+    transform: translate(-50%, -100%);
+    margin-top: -8px;
+    display: none;
 }
 
 .card-image {

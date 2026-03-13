@@ -8,7 +8,7 @@ DB_PATH = Path(__file__).parent / "pxmemo.db"
 
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -28,6 +28,13 @@ def init_db():
     """)
     conn.commit()
     conn.close()
+
+
+def image_exists(original_name: str) -> bool:
+    conn = get_db()
+    row = conn.execute("SELECT 1 FROM images WHERE original_name = ?", (original_name,)).fetchone()
+    conn.close()
+    return row is not None
 
 
 def add_image(filename: str, original_name: str) -> int:
@@ -91,20 +98,9 @@ def format_interpolated_date(dt: datetime, precision: str) -> str:
       day:   round to nearest day   -> 'YYYY-MM-DD'
     """
     if precision == "year":
-        # Round: past July 1 rounds up to next year
-        year = dt.year
-        if dt.month > 7 or (dt.month == 7 and dt.day > 1):
-            year += 1
-        return str(year)
+        return str(dt.year)
     elif precision == "month":
-        # Round: past the 16th rounds up to next month
-        year, month = dt.year, dt.month
-        if dt.day >= 16:
-            month += 1
-            if month > 12:
-                month = 1
-                year += 1
-        return f"{year:04d}-{month:02d}"
+        return f"{dt.year:04d}-{dt.month:02d}"
     else:
         return dt.strftime("%Y-%m-%d")
 
@@ -132,19 +128,28 @@ def clear_anchor_date(image_id: int):
 
 
 def resort_by_date():
-    """Sort images chronologically by anchor date. Undated images go to the end
-    in their current relative order. Then recompute interpolated dates."""
+    """Sort anchored images into chronological order while preserving the
+    relative positions of unanchored images among their neighboring anchors.
+
+    Algorithm: walk the current order, note which slots are anchors.
+    Sort the anchors chronologically, then put them back into those same
+    slots. Unanchored images stay exactly where they were."""
     conn = get_db()
     rows = conn.execute("SELECT id, anchor_date, sort_order FROM images ORDER BY sort_order").fetchall()
 
-    dated = [(r["id"], r["anchor_date"]) for r in rows if r["anchor_date"]]
-    undated = [r["id"] for r in rows if not r["anchor_date"]]
+    # Collect anchor slot indices and sort the anchors chronologically
+    anchor_slots = []  # (index_in_list, id, anchor_date)
+    for i, r in enumerate(rows):
+        if r["anchor_date"]:
+            anchor_slots.append((i, r["id"], r["anchor_date"]))
 
-    # Sort dated images chronologically
-    dated.sort(key=lambda x: parse_date_to_datetime(x[1]))
+    sorted_anchors = sorted(anchor_slots, key=lambda x: parse_date_to_datetime(x[2]))
 
-    # New order: dated first (chronological), then undated (preserve relative order)
-    new_order = [img_id for img_id, _ in dated] + undated
+    # Build new order: start with current order, then swap anchors into sorted positions
+    new_order = [r["id"] for r in rows]
+    slot_indices = [s[0] for s in anchor_slots]  # original slot positions
+    for slot_idx, (_, anchor_id, _) in zip(slot_indices, sorted_anchors):
+        new_order[slot_idx] = anchor_id
 
     for i, img_id in enumerate(new_order):
         conn.execute("UPDATE images SET sort_order = ? WHERE id = ?", (i, img_id))

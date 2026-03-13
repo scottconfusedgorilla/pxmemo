@@ -40,7 +40,8 @@ async def upload_images(files: list[UploadFile] = File(...)):
     results = []
     for f in files:
         data = await f.read()
-        # Use UUID prefix to avoid collisions, keep original name for display
+        if db.image_exists(f.filename):
+            continue  # silently skip duplicates
         ext = Path(f.filename).suffix.lower()
         stored_name = f"{uuid.uuid4().hex[:12]}{ext}"
 

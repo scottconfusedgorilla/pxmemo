@@ -62,8 +62,76 @@ document.querySelectorAll('.timeline-card').forEach(card => {
 });
 
 
+// --- Client-side date interpolation (mirrors server logic) ---
+
+function datePrecision(dateStr) {
+    if (dateStr.length === 4) return 'year';
+    if (dateStr.length === 7) return 'month';
+    return 'day';
+}
+
+function parseDateToMs(dateStr) {
+    dateStr = dateStr.trim();
+    if (dateStr.length === 4) return new Date(parseInt(dateStr), 6, 1).getTime();      // Jul 1
+    if (dateStr.length === 7) {
+        const [y, m] = dateStr.split('-').map(Number);
+        return new Date(y, m - 1, 15).getTime();  // 15th
+    }
+    const [y, m, d] = dateStr.split('-').map(Number);
+    return new Date(y, m - 1, d).getTime();
+}
+
+function formatInterpolatedDate(ms, precision) {
+    const dt = new Date(ms);
+    if (precision === 'year') {
+        return String(dt.getFullYear());
+    } else if (precision === 'month') {
+        return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`;
+    }
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
+// Compute the interpolated date for a position in a given ordered list of {id, anchor_date}
+function computeDateAtPosition(imageList, posIdx) {
+    // Find prev and next anchors (skip the item at posIdx itself)
+    let prevDate = null, prevPos = null;
+    let nextDate = null, nextPos = null;
+    for (let i = posIdx - 1; i >= 0; i--) {
+        if (imageList[i].anchor_date) {
+            prevDate = imageList[i].anchor_date;
+            prevPos = i;
+            break;
+        }
+    }
+    for (let i = posIdx + 1; i < imageList.length; i++) {
+        if (imageList[i].anchor_date) {
+            nextDate = imageList[i].anchor_date;
+            nextPos = i;
+            break;
+        }
+    }
+
+    if (prevDate && nextDate) {
+        const d1 = parseDateToMs(prevDate);
+        const d2 = parseDateToMs(nextDate);
+        const totalSlots = nextPos - prevPos;
+        const position = posIdx - prevPos;
+        const computed = d1 + (d2 - d1) * position / totalSlots;
+        const p1 = datePrecision(prevDate);
+        const p2 = datePrecision(nextDate);
+        const precOrder = { year: 0, month: 1, day: 2 };
+        const precision = precOrder[p1] <= precOrder[p2] ? p1 : p2;
+        return formatInterpolatedDate(computed, precision);
+    } else if (prevDate) {
+        return prevDate;
+    } else if (nextDate) {
+        return nextDate;
+    }
+    return null;
+}
+
+
 // --- Bounding anchors ---
-// For a given image index in currentImages, find the IDs of its prev/next anchors
 function findBoundingAnchors(images, idx) {
     let prevId = null, nextId = null;
     let prevDate = null, nextDate = null;
@@ -90,7 +158,7 @@ function setupHoverHighlights() {
     const cards = timeline.querySelectorAll('.timeline-card');
     cards.forEach((card, idx) => {
         const img = currentImages[idx];
-        if (img && img.anchor_date) return; // anchors don't need this
+        if (img && img.anchor_date) return;
 
         card.addEventListener('mouseenter', () => {
             const { prevId, nextId } = findBoundingAnchors(currentImages, idx);
@@ -112,12 +180,60 @@ function setupHoverHighlights() {
     });
 }
 
+
+// --- Drag date preview ---
+let dragPreview = null;
+let dragMouseX = 0, dragMouseY = 0;
+
+function createDragPreview() {
+    if (dragPreview) return;
+    dragPreview = document.createElement('div');
+    dragPreview.className = 'drag-date-preview';
+    document.body.appendChild(dragPreview);
+}
+
+function removeDragPreview() {
+    if (dragPreview) {
+        dragPreview.remove();
+        dragPreview = null;
+    }
+}
+
+function updateDragPreview(dateStr) {
+    if (!dragPreview) return;
+    if (dateStr) {
+        dragPreview.textContent = dateStr;
+        dragPreview.style.display = 'block';
+        dragPreview.style.left = dragMouseX + 'px';
+        dragPreview.style.top = dragMouseY + 'px';
+    } else {
+        dragPreview.style.display = 'none';
+    }
+}
+
+function onDragMouseMove(e) {
+    dragMouseX = e.clientX;
+    dragMouseY = e.clientY;
+    if (dragPreview && dragPreview.style.display !== 'none') {
+        dragPreview.style.left = dragMouseX + 'px';
+        dragPreview.style.top = dragMouseY + 'px';
+    }
+}
+
+
 // --- Drag-and-drop reordering ---
 const timeline = document.getElementById('timeline');
 
 setupHoverHighlights();
 
+let draggedItemId = null;
+
 async function handleDragEnd(evt) {
+    removeDragPreview();
+    document.removeEventListener('mousemove', onDragMouseMove);
+    timeline.querySelectorAll('.anchor-highlight').forEach(el => el.classList.remove('anchor-highlight'));
+    draggedItemId = null;
+
     const cards = timeline.querySelectorAll('.timeline-card');
     const order = Array.from(cards).map(c => parseInt(c.dataset.id));
 
@@ -149,12 +265,53 @@ async function handleDragEnd(evt) {
     refreshTimeline();
 }
 
+function handleDragStart(evt) {
+    draggedItemId = parseInt(evt.item.dataset.id);
+    createDragPreview();
+    document.addEventListener('mousemove', onDragMouseMove);
+}
+
+function handleSortChange(evt) {
+    // Called whenever the ghost moves to a new position
+    // Build the current visual order (excluding the dragged item which is the ghost)
+    const cards = timeline.querySelectorAll('.timeline-card');
+    const order = Array.from(cards).map(c => ({
+        id: parseInt(c.dataset.id),
+        anchor_date: c.classList.contains('sortable-ghost')
+            ? null  // the dragged item loses its anchor during preview
+            : (currentImages.find(img => img.id === parseInt(c.dataset.id)) || {}).anchor_date || null
+    }));
+
+    // Find the ghost position (where the item would land)
+    const ghostIdx = Array.from(cards).findIndex(c => c.classList.contains('sortable-ghost'));
+    if (ghostIdx === -1) return;
+
+    // Compute the date at the ghost position
+    const dateStr = computeDateAtPosition(order, ghostIdx);
+    updateDragPreview(dateStr);
+
+    // Highlight the bounding anchors
+    timeline.querySelectorAll('.anchor-highlight').forEach(el => el.classList.remove('anchor-highlight'));
+    const { prevId, nextId } = findBoundingAnchors(order, ghostIdx);
+    if (prevId != null) {
+        const el = timeline.querySelector(`[data-id="${prevId}"]`);
+        if (el) el.classList.add('anchor-highlight');
+    }
+    if (nextId != null) {
+        const el = timeline.querySelector(`[data-id="${nextId}"]`);
+        if (el) el.classList.add('anchor-highlight');
+    }
+}
+
 function initSortable() {
     if (!timeline) return;
     Sortable.create(timeline, {
         animation: 200,
         ghostClass: 'sortable-ghost',
         chosenClass: 'sortable-chosen',
+        dragClass: 'sortable-drag',
+        onStart: handleDragStart,
+        onChange: handleSortChange,
         onEnd: handleDragEnd,
     });
 }
