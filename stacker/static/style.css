@@ -167,6 +167,8 @@ input:focus { outline: 2px solid var(--amber); border-color: var(--amber); }
 .thumb-card:hover { border-color: var(--amber); box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
 .thumb-card.selected { border-color: var(--amber); box-shadow: 0 0 0 3px var(--amber-light); }
 .thumb-card.keeper { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-light); }
+.thumb-card.winner { border-color: var(--green); box-shadow: 0 0 0 3px var(--green-light); }
+.thumb-card.loser { border-color: #d4a017; box-shadow: 0 0 0 3px var(--amber-light); }
 .thumb-card img {
     display: block;
     width: 200px;
@@ -198,6 +200,8 @@ input:focus { outline: 2px solid var(--amber); border-color: var(--amber); }
     text-transform: uppercase;
 }
 .badge-keeper { background: var(--green); color: #fff; }
+.badge-winner { background: var(--green); color: #fff; }
+.badge-loser { background: #d4a017; color: #fff; }
 .badge-selected { background: var(--amber); color: #fff; }
 
 /* Image browser grid */

@@ -28,10 +28,12 @@
 
     <div class="thumb-grid" id="thumb-grid">
         {% for m in members %}
-        <div class="thumb-card {% if stack.keep_image_id == m.id %}keeper{% endif %}"
+        <div class="thumb-card {% if m.is_winner %}winner{% else %}loser{% endif %} {% if stack.keep_image_id == m.id %}keeper{% endif %}"
              data-id="{{ m.id }}" onclick="selectKeeper({{ m.id }})">
-            {% if stack.keep_image_id == m.id %}
-            <span class="thumb-badge badge-keeper">Keep</span>
+            {% if m.is_winner %}
+            <span class="thumb-badge badge-winner">Winner</span>
+            {% else %}
+            <span class="thumb-badge badge-loser">Stacked</span>
             {% endif %}
             {% if m.thumb %}
             <img src="/thumbnails/{{ m.thumb }}" alt="{{ m.filename }}">
@@ -39,7 +41,8 @@
             <div style="width:200px;height:200px;display:flex;align-items:center;justify-content:center;background:#eee;color:#999;font-size:0.8rem;">No preview</div>
             {% endif %}
             <div class="thumb-meta">
-                <div class="name" title="{{ m.filename }}">{{ m.filename }}</div>
+                <div class="name" title="{{ m.file_path }}">{{ m.filename }}</div>
+                <div style="font-size: 0.65rem; color: var(--text-muted); word-break: break-all; max-width: 184px;">{{ m.file_path }}</div>
                 <div>{{ m.width }}&times;{{ m.height }} &middot; {{ (m.file_size / 1024)|round(0)|int }} KB</div>
                 {% if m.exif_date %}<div>{{ m.exif_date[:10] }}</div>{% endif %}
             </div>

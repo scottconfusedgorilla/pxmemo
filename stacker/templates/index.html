@@ -77,6 +77,26 @@
     <div id="date-result" style="display:none;" class="alert alert-success"></div>
 </div>
 
+<!-- Consolidate Section -->
+<div class="card">
+    <h2>Consolidate</h2>
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 12px;">
+        Produce one clean folder: best version of every unique photo, duplicates in _PXStack folders, manifest proving nothing was lost.
+    </p>
+    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <input type="text" id="consolidate-folder" placeholder="Output folder path (e.g. S:\CleanArchive)" style="flex:1;">
+        <button class="btn btn-success" id="btn-consolidate" onclick="startConsolidate()">Consolidate</button>
+    </div>
+    <div id="consolidate-progress" style="display:none;">
+        <div class="progress-bar">
+            <div class="progress-fill" id="consolidate-progress-fill" style="width: 0%"></div>
+        </div>
+        <div id="consolidate-status" style="font-size: 0.85rem; color: var(--text-muted);"></div>
+        <div id="consolidate-eta" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;"></div>
+    </div>
+    <div id="consolidate-result" style="display:none;" class="alert alert-success"></div>
+</div>
+
 <!-- Quick Actions -->
 <div class="card">
     <h2>Quick Actions</h2>
@@ -272,6 +292,64 @@ async function pollDateEstimate() {
     }
 }
 
+let consolidatePollInterval = null;
+let consolidateStartTime = null;
+
+async function startConsolidate() {
+    const folder = document.getElementById('consolidate-folder').value.trim();
+    if (!folder) return alert('Enter an output folder path');
+
+    document.getElementById('btn-consolidate').disabled = true;
+    document.getElementById('consolidate-progress').style.display = 'block';
+    document.getElementById('consolidate-result').style.display = 'none';
+    consolidateStartTime = Date.now();
+
+    const resp = await fetch('/api/consolidate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({output_folder: folder})
+    });
+    const data = await resp.json();
+    if (data.error) {
+        alert(data.error);
+        document.getElementById('btn-consolidate').disabled = false;
+        return;
+    }
+    consolidatePollInterval = setInterval(pollConsolidate, 500);
+}
+
+async function pollConsolidate() {
+    const resp = await fetch('/api/consolidate/status');
+    const s = await resp.json();
+
+    if (s.total > 0) {
+        const pct = Math.round((s.processed / s.total) * 100);
+        document.getElementById('consolidate-progress-fill').style.width = pct + '%';
+        const eta = calcEta(s.processed, s.total, consolidateStartTime);
+        document.getElementById('consolidate-status').textContent =
+            `${s.processed} / ${s.total} — ${s.current_file}`;
+        document.getElementById('consolidate-eta').textContent = eta;
+    }
+
+    if (!s.running && s.result) {
+        clearInterval(consolidatePollInterval);
+        document.getElementById('consolidate-progress').style.display = 'none';
+        const elapsed = formatTime((Date.now() - consolidateStartTime) / 1000);
+        const r = s.result;
+        const el = document.getElementById('consolidate-result');
+        if (r.error) {
+            el.className = 'alert alert-warning';
+            el.textContent = 'Error: ' + r.error;
+        } else {
+            el.className = 'alert alert-success';
+            el.innerHTML = `Consolidated in ${elapsed}: ${r.keepers} keepers, ${r.copied} unique, ${r.stacked} stacked, ${r.paired} paired. ` +
+                `${r.manifest_rows} rows in manifest. Total source: ${r.total_source}.`;
+        }
+        el.style.display = 'block';
+        document.getElementById('btn-consolidate').disabled = false;
+    }
+}
+
 async function resetAll() {
     await fetch('/api/reset', {method: 'POST'});
     location.reload();
@@ -296,6 +374,15 @@ async function checkRunningTasks() {
         document.getElementById('btn-analyze').disabled = true;
         document.getElementById('analyze-progress').style.display = 'block';
         analyzePollInterval = setInterval(pollAnalyze, 500);
+    }
+
+    const consolidateResp = await fetch('/api/consolidate/status');
+    const cons = await consolidateResp.json();
+    if (cons.running) {
+        consolidateStartTime = Date.now();
+        document.getElementById('btn-consolidate').disabled = true;
+        document.getElementById('consolidate-progress').style.display = 'block';
+        consolidatePollInterval = setInterval(pollConsolidate, 500);
     }
 
     const dateResp = await fetch('/api/date-estimate/status');

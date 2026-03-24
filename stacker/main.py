@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from contextlib import asynccontextmanager
 from PIL import Image, ImageOps
 
+import consolidator
 import db
 import dater
 import scanner
@@ -23,6 +24,7 @@ THUMB_MAX = 300
 # Scan state (simple in-process tracking)
 scan_state = {"running": False, "scanned": 0, "total": 0, "current_file": "", "result": None}
 analyze_state = {"running": False, "phase": "", "processed": 0, "total": 0, "result": None}
+consolidate_state = {"running": False, "processed": 0, "total": 0, "current_file": "", "result": None}
 date_state = {"running": False, "processed": 0, "total": 0, "current_file": "", "result": None}
 
 
@@ -99,13 +101,16 @@ async def stack_detail(request: Request, stack_id: int):
     if not stack:
         return HTMLResponse("<p>Stack not found</p>", status_code=404)
     members = db.get_stack_members(stack_id)
-    # Ensure thumbnails
+    # Auto-pick winner and mark members
+    winner = db.pick_winner(members, stack.get("keep_image_id"))
     for m in members:
         m["thumb"] = ensure_thumbnail(m["file_path"])
+        m["is_winner"] = m["id"] == winner["id"]
     return templates.TemplateResponse("stack_detail.html", {
         "request": request,
         "stack": stack,
         "members": members,
+        "winner_id": winner["id"],
     })
 
 
@@ -216,6 +221,46 @@ async def analyze():
 @app.get("/api/analyze/status")
 async def analyze_status():
     return JSONResponse(analyze_state)
+
+
+# --- Consolidation API ---
+
+@app.post("/api/consolidate")
+async def start_consolidate(request: Request):
+    data = await request.json()
+    folder = data.get("output_folder", "")
+    if not folder:
+        return JSONResponse({"error": "Output folder required"}, status_code=400)
+    if consolidate_state["running"]:
+        return JSONResponse({"error": "Consolidation already in progress"}, status_code=409)
+
+    def run_consolidate():
+        consolidate_state["running"] = True
+        consolidate_state["processed"] = 0
+        consolidate_state["total"] = 0
+        consolidate_state["result"] = None
+
+        def progress(processed, total, current_file):
+            consolidate_state["processed"] = processed
+            consolidate_state["total"] = total
+            consolidate_state["current_file"] = current_file
+
+        try:
+            result = consolidator.consolidate(folder, progress_callback=progress)
+            consolidate_state["result"] = result
+        except Exception as e:
+            consolidate_state["result"] = {"error": str(e)}
+        finally:
+            consolidate_state["running"] = False
+
+    thread = threading.Thread(target=run_consolidate, daemon=True)
+    thread.start()
+    return JSONResponse({"status": "started"})
+
+
+@app.get("/api/consolidate/status")
+async def consolidate_status():
+    return JSONResponse(consolidate_state)
 
 
 # --- Date Estimation API ---

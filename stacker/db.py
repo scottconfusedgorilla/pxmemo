@@ -290,6 +290,48 @@ def get_export_data() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# --- Consolidation helpers ---
+
+def get_all_stacks_with_members() -> list[dict]:
+    """Get all stacks with their members, for consolidation."""
+    conn = get_db()
+    stacks = conn.execute("SELECT * FROM stacks").fetchall()
+    result = []
+    for s in stacks:
+        stack = dict(s)
+        members = conn.execute("""
+            SELECT i.* FROM images i
+            JOIN stack_members sm ON i.id = sm.image_id
+            WHERE sm.stack_id = ?
+            ORDER BY (i.width * i.height) DESC, i.file_size DESC
+        """, (s["id"],)).fetchall()
+        stack["members"] = [dict(m) for m in members]
+        result.append(stack)
+    conn.close()
+    return result
+
+
+def get_stacked_image_ids() -> set[int]:
+    """Get all image IDs that are in at least one stack."""
+    conn = get_db()
+    rows = conn.execute("SELECT DISTINCT image_id FROM stack_members").fetchall()
+    conn.close()
+    return {r["image_id"] for r in rows}
+
+
+def pick_winner(members: list[dict], keep_image_id: int | None = None) -> dict:
+    """Pick the best image from a stack's members.
+    If keep_image_id is set (user override), use that.
+    Otherwise: highest resolution (width*height), tiebreak largest file_size.
+    Members should already be sorted by resolution DESC, file_size DESC.
+    """
+    if keep_image_id:
+        for m in members:
+            if m["id"] == keep_image_id:
+                return m
+    return members[0]  # already sorted best-first
+
+
 # --- Reset ---
 
 def reset_db():
