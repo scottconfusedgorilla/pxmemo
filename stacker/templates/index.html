@@ -32,6 +32,7 @@
             <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
         </div>
         <div id="scan-status" style="font-size: 0.85rem; color: var(--text-muted);"></div>
+        <div id="scan-eta" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;"></div>
     </div>
     <div id="scan-result" style="display:none;" class="alert alert-success"></div>
 </div>
@@ -64,6 +65,7 @@
             <div class="progress-fill" id="date-progress-fill" style="width: 0%"></div>
         </div>
         <div id="date-status" style="font-size: 0.85rem; color: var(--text-muted);"></div>
+        <div id="date-eta" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;"></div>
     </div>
     <div id="date-result" style="display:none;" class="alert alert-success"></div>
 </div>
@@ -83,6 +85,21 @@
 {% block scripts %}
 <script>
 let pollInterval = null;
+let scanStartTime = null;
+
+function formatTime(seconds) {
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+function calcEta(processed, total, startTime) {
+    if (processed === 0) return '';
+    const elapsed = (Date.now() - startTime) / 1000;
+    const rate = processed / elapsed;
+    const remaining = (total - processed) / rate;
+    return `${formatTime(elapsed)} elapsed · ~${formatTime(remaining)} remaining · ${rate.toFixed(1)}/s`;
+}
 
 async function startScan() {
     const folder = document.getElementById('scan-folder').value.trim();
@@ -91,6 +108,7 @@ async function startScan() {
     document.getElementById('btn-scan').disabled = true;
     document.getElementById('scan-progress').style.display = 'block';
     document.getElementById('scan-result').style.display = 'none';
+    scanStartTime = Date.now();
 
     const resp = await fetch('/api/scan', {
         method: 'POST',
@@ -114,13 +132,16 @@ async function pollScan() {
     if (s.total > 0) {
         const pct = Math.round((s.scanned / s.total) * 100);
         document.getElementById('progress-fill').style.width = pct + '%';
+        const eta = calcEta(s.scanned, s.total, scanStartTime);
         document.getElementById('scan-status').textContent =
             `${s.scanned} / ${s.total} — ${s.current_file}`;
+        document.getElementById('scan-eta').textContent = eta;
     }
 
     if (!s.running && s.result) {
         clearInterval(pollInterval);
         document.getElementById('scan-progress').style.display = 'none';
+        const elapsed = formatTime((Date.now() - scanStartTime) / 1000);
         const r = s.result;
         if (r.error) {
             document.getElementById('scan-result').className = 'alert alert-warning';
@@ -128,11 +149,10 @@ async function pollScan() {
         } else {
             document.getElementById('scan-result').className = 'alert alert-success';
             document.getElementById('scan-result').textContent =
-                `Done! Scanned ${r.scanned} images (${r.errors} errors).`;
+                `Done! Scanned ${r.scanned} images (${r.errors} errors) in ${elapsed}.`;
         }
         document.getElementById('scan-result').style.display = 'block';
         document.getElementById('btn-scan').disabled = false;
-        // Reload stats
         setTimeout(() => location.reload(), 1000);
     }
 }
@@ -151,12 +171,14 @@ async function runAnalysis() {
 }
 
 let datePollInterval = null;
+let dateStartTime = null;
 
 async function startDateEstimate() {
     const pct = parseFloat(document.getElementById('sample-pct').value) || 1.0;
     document.getElementById('btn-date').disabled = true;
     document.getElementById('date-progress').style.display = 'block';
     document.getElementById('date-result').style.display = 'none';
+    dateStartTime = Date.now();
 
     const resp = await fetch('/api/date-estimate', {
         method: 'POST',
@@ -179,13 +201,16 @@ async function pollDateEstimate() {
     if (s.total > 0) {
         const pct = Math.round((s.processed / s.total) * 100);
         document.getElementById('date-progress-fill').style.width = pct + '%';
+        const eta = calcEta(s.processed, s.total, dateStartTime);
         document.getElementById('date-status').textContent =
             `${s.processed} / ${s.total} — ${s.current_file}`;
+        document.getElementById('date-eta').textContent = eta;
     }
 
     if (!s.running && s.result) {
         clearInterval(datePollInterval);
         document.getElementById('date-progress').style.display = 'none';
+        const elapsed = formatTime((Date.now() - dateStartTime) / 1000);
         const r = s.result;
         if (r.error) {
             document.getElementById('date-result').className = 'alert alert-warning';
@@ -193,7 +218,7 @@ async function pollDateEstimate() {
         } else {
             document.getElementById('date-result').className = 'alert alert-success';
             document.getElementById('date-result').innerHTML =
-                `Estimated dates for ${r.sampled} of ${r.total_images} images (${r.sample_pct}% sample). ` +
+                `Estimated dates for ${r.sampled} of ${r.total_images} images (${r.sample_pct}% sample) in ${elapsed}. ` +
                 `<a href="/date-results">View results</a>`;
         }
         document.getElementById('date-result').style.display = 'block';

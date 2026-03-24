@@ -38,6 +38,9 @@ def _load_model():
     if _model is not None:
         return
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"CLIP loading on: {device}")
+
     model_name = "ViT-B-32"
     pretrained = "laion2b_s34b_b79k"
 
@@ -45,11 +48,11 @@ def _load_model():
         model_name, pretrained=pretrained
     )
     _tokenizer = open_clip.get_tokenizer(model_name)
-    _model.eval()
+    _model = _model.to(device).eval()
 
     # Pre-compute text embeddings for all decade prompts
     prompts = [p[1] for p in DECADE_PROMPTS]
-    text_tokens = _tokenizer(prompts)
+    text_tokens = _tokenizer(prompts).to(device)
     with torch.no_grad():
         _text_features = _model.encode_text(text_tokens)
         _text_features /= _text_features.norm(dim=-1, keepdim=True)
@@ -62,8 +65,9 @@ def estimate_date(image_path: str) -> list[dict]:
     """
     _load_model()
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     img = Image.open(image_path).convert("RGB")
-    img_tensor = _preprocess(img).unsqueeze(0)
+    img_tensor = _preprocess(img).unsqueeze(0).to(device)
 
     with torch.no_grad():
         image_features = _model.encode_image(img_tensor)

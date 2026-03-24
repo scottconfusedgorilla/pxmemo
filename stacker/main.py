@@ -211,6 +211,17 @@ async def date_estimate_status():
 @app.get("/date-results", response_class=HTMLResponse)
 async def date_results_page(request: Request):
     result = date_state.get("result")
+    # Add thumbnails and sort by decade
+    if result and result.get("results"):
+        for r in result["results"]:
+            if r.get("file_path"):
+                r["thumb"] = ensure_thumbnail(r["file_path"])
+        # Sort by decade (earliest first), then by confidence descending
+        decade_order = ["1920s", "1930s", "1940s", "1950s", "1960s", "1970s", "1980s", "1990s", "2000s", "2010s", "2020s"]
+        result["results"].sort(key=lambda r: (
+            decade_order.index(r["top_decade"]) if r.get("top_decade") in decade_order else 99,
+            -r.get("top_score", 0)
+        ))
     return templates.TemplateResponse("date_results.html", {
         "request": request,
         "result": result,

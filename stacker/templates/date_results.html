@@ -49,6 +49,7 @@
     <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
         <thead>
             <tr style="border-bottom: 2px solid var(--border); text-align: left;">
+                <th style="padding: 8px; width: 80px;"></th>
                 <th style="padding: 8px;">Filename</th>
                 <th style="padding: 8px;">Best Guess</th>
                 <th style="padding: 8px;">Confidence</th>
@@ -59,11 +60,20 @@
             {% for r in result.results %}
             {% if r.error is defined %}
             <tr style="border-bottom: 1px solid var(--border); background: var(--red-light);">
+                <td style="padding: 8px;"></td>
                 <td style="padding: 8px;" title="{{ r.file_path }}">{{ r.filename }}</td>
                 <td style="padding: 8px;" colspan="3">Error: {{ r.error }}</td>
             </tr>
             {% else %}
             <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 4px 8px;">
+                    {% if r.thumb %}
+                    <img src="/thumbnails/{{ r.thumb }}" alt="{{ r.filename }}"
+                         style="width: 70px; height: 50px; object-fit: cover; border-radius: 4px;">
+                    {% else %}
+                    <div style="width: 70px; height: 50px; background: #eee; border-radius: 4px;"></div>
+                    {% endif %}
+                </td>
                 <td style="padding: 8px;" title="{{ r.file_path }}">{{ r.filename }}</td>
                 <td style="padding: 8px; font-weight: 600;">{{ r.top_decade }}</td>
                 <td style="padding: 8px;">
