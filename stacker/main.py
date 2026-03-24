@@ -22,6 +22,7 @@ THUMB_MAX = 300
 
 # Scan state (simple in-process tracking)
 scan_state = {"running": False, "scanned": 0, "total": 0, "current_file": "", "result": None}
+analyze_state = {"running": False, "phase": "", "processed": 0, "total": 0, "result": None}
 date_state = {"running": False, "processed": 0, "total": 0, "current_file": "", "result": None}
 
 
@@ -77,6 +78,14 @@ async def home(request: Request):
 async def stacks_page(request: Request, show_resolved: str = ""):
     include_resolved = show_resolved == "on"
     stacks = db.get_all_stacks(include_resolved=include_resolved)
+    # Add preview thumbnails for each stack
+    for stack in stacks:
+        previews = db.get_stack_preview_images(stack["id"], limit=3)
+        stack["previews"] = []
+        for p in previews:
+            thumb = ensure_thumbnail(p["file_path"])
+            if thumb:
+                stack["previews"].append(thumb)
     return templates.TemplateResponse("stacks.html", {
         "request": request,
         "stacks": stacks,
@@ -100,21 +109,31 @@ async def stack_detail(request: Request, stack_id: int):
     })
 
 
+PAGE_SIZE = 60
+
 @app.get("/images", response_class=HTMLResponse)
-async def images_page(request: Request, q: str = "", filter: str = "all"):
+async def images_page(request: Request, q: str = "", filter: str = "all", page: int = 1):
+    offset = (page - 1) * PAGE_SIZE
     if q:
-        images = db.search_images(q)
+        images = db.search_images(q, limit=PAGE_SIZE, offset=offset)
+        total = db.search_images_count(q)
     elif filter == "unstacked":
-        images = db.get_images_not_in_stacks()
+        images = db.get_images_not_in_stacks(limit=PAGE_SIZE, offset=offset)
+        total = db.get_unstacked_count()
     else:
-        images = db.get_all_images()
+        images = db.get_all_images(limit=PAGE_SIZE, offset=offset)
+        total = db.get_image_count()
     for img in images:
         img["thumb"] = ensure_thumbnail(img["file_path"])
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
     return templates.TemplateResponse("images.html", {
         "request": request,
         "images": images,
         "query": q,
         "filter": filter,
+        "page": page,
+        "total_pages": total_pages,
+        "total": total,
     })
 
 
@@ -161,13 +180,42 @@ async def scan_status():
 @app.post("/api/analyze")
 async def analyze():
     """Run auto-detection: find duplicate and resolution variant stacks."""
-    result_exact = stacker.find_duplicate_stacks()
-    result_near = stacker.find_near_duplicates()
-    return JSONResponse({
-        "duplicate_stacks": result_exact["duplicate_stacks"],
-        "lower_res_stacks": result_exact["lower_res_stacks"],
-        "near_duplicate_stacks": result_near["near_duplicate_stacks"],
-    })
+    if analyze_state["running"]:
+        return JSONResponse({"error": "Analysis already in progress"}, status_code=409)
+
+    def run_analyze():
+        analyze_state["running"] = True
+        analyze_state["processed"] = 0
+        analyze_state["total"] = 0
+        analyze_state["phase"] = "exact"
+        analyze_state["result"] = None
+
+        def progress(phase, processed, total):
+            analyze_state["phase"] = phase
+            analyze_state["processed"] = processed
+            analyze_state["total"] = total
+
+        try:
+            result_exact = stacker.find_duplicate_stacks(progress_callback=progress)
+            result_near = stacker.find_near_duplicates(progress_callback=progress)
+            analyze_state["result"] = {
+                "duplicate_stacks": result_exact["duplicate_stacks"],
+                "lower_res_stacks": result_exact["lower_res_stacks"],
+                "near_duplicate_stacks": result_near["near_duplicate_stacks"],
+            }
+        except Exception as e:
+            analyze_state["result"] = {"error": str(e)}
+        finally:
+            analyze_state["running"] = False
+
+    thread = threading.Thread(target=run_analyze, daemon=True)
+    thread.start()
+    return JSONResponse({"status": "started"})
+
+
+@app.get("/api/analyze/status")
+async def analyze_status():
+    return JSONResponse(analyze_state)
 
 
 # --- Date Estimation API ---

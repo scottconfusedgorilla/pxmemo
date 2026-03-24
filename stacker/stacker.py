@@ -10,7 +10,7 @@ EXACT_THRESHOLD = 0
 NEAR_THRESHOLD = 4
 
 
-def find_duplicate_stacks() -> dict:
+def find_duplicate_stacks(progress_callback=None) -> dict:
     """Group images by exact pHash match. Creates 'duplicate' stacks.
     Also detects resolution variants within each hash group.
 
@@ -32,31 +32,36 @@ def find_duplicate_stacks() -> dict:
     # Get existing stack memberships to avoid re-stacking
     existing = _get_stacked_image_ids()
 
-    for phash, group in hash_groups.items():
-        # Filter out already-stacked images
+    groups_with_dupes = [(ph, grp) for ph, grp in hash_groups.items()
+                         if len([i for i in grp if i["id"] not in existing]) >= 2]
+    total = len(groups_with_dupes)
+    processed = 0
+
+    for phash, group in groups_with_dupes:
         unstacked = [img for img in group if img["id"] not in existing]
         if len(unstacked) < 2:
             continue
 
-        # Check if all same resolution → exact duplicates
         resolutions = {(img["width"], img["height"]) for img in unstacked}
         if len(resolutions) == 1:
-            # All same resolution — exact duplicates
             ids = [img["id"] for img in unstacked]
             db.create_stack("duplicate", label=f"Exact match: {unstacked[0]['filename']}", image_ids=ids)
             duplicate_stacks += 1
             existing.update(ids)
         else:
-            # Different resolutions — resolution variants
             ids = [img["id"] for img in unstacked]
             db.create_stack("lower_res", label=f"Resolution variants: {unstacked[0]['filename']}", image_ids=ids)
             lower_res_stacks += 1
             existing.update(ids)
 
+        processed += 1
+        if progress_callback:
+            progress_callback("exact", processed, total)
+
     return {"duplicate_stacks": duplicate_stacks, "lower_res_stacks": lower_res_stacks}
 
 
-def find_near_duplicates() -> dict:
+def find_near_duplicates(progress_callback=None) -> dict:
     """Find images with similar (but not identical) pHashes.
     These are likely scans of the same photo with different settings.
 
@@ -69,7 +74,7 @@ def find_near_duplicates() -> dict:
     existing = _get_stacked_image_ids()
     unstacked = [img for img in images if img["id"] not in existing and img["phash"]]
 
-    # Compare all pairs (O(n²) but fine for typical archive sizes)
+    total = len(unstacked)
     paired = set()
     groups = []
 
@@ -91,6 +96,9 @@ def find_near_duplicates() -> dict:
         if len(group) >= 2:
             groups.append(group)
             paired.add(img_a["id"])
+
+        if progress_callback:
+            progress_callback("near", i + 1, total)
 
     stacks_created = 0
     for group in groups:

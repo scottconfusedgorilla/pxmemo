@@ -23,8 +23,7 @@
 </div>
 {% else %}
 <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">
-    {{ images|length }} images
-    {% if selected_ids is defined and selected_ids|length > 0 %} · {{ selected_ids|length }} selected{% endif %}
+    {{ total }} images · Page {{ page }} of {{ total_pages }}
 </p>
 
 <!-- Manual stack creation -->
@@ -50,6 +49,30 @@
     </div>
     {% endfor %}
 </div>
+
+<!-- Pagination -->
+{% if total_pages > 1 %}
+<div style="display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 24px;">
+    {% if page > 1 %}
+    <a href="/images?filter={{ filter }}&q={{ query }}&page={{ page - 1 }}" class="btn btn-outline btn-sm">&larr; Prev</a>
+    {% endif %}
+
+    {% for p in range(1, total_pages + 1) %}
+        {% if p == page %}
+        <span class="btn btn-primary btn-sm">{{ p }}</span>
+        {% elif p <= 3 or p >= total_pages - 2 or (p >= page - 2 and p <= page + 2) %}
+        <a href="/images?filter={{ filter }}&q={{ query }}&page={{ p }}" class="btn btn-outline btn-sm">{{ p }}</a>
+        {% elif p == 4 or p == total_pages - 3 %}
+        <span style="color: var(--text-muted);">&hellip;</span>
+        {% endif %}
+    {% endfor %}
+
+    {% if page < total_pages %}
+    <a href="/images?filter={{ filter }}&q={{ query }}&page={{ page + 1 }}" class="btn btn-outline btn-sm">Next &rarr;</a>
+    {% endif %}
+</div>
+{% endif %}
+
 {% endif %}
 {% endblock %}
 

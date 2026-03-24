@@ -1,7 +1,7 @@
 """PXStacker scanner — recursive image scan with pHash and metadata extraction."""
 
 import os
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from datetime import datetime
 
@@ -104,8 +104,8 @@ def scan_folder(folder_path: str, progress_callback=None) -> dict:
             progress_callback(0, 0, "")
         return {"total_found": len(image_files), "scanned": 0, "skipped": skipped, "errors": 0}
 
-    # Process in parallel
-    with ProcessPoolExecutor(max_workers=NUM_WORKERS) as executor:
+    # Process in parallel (threads — GIL released during I/O and Pillow ops)
+    with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
         futures = {executor.submit(_process_single_image, str(f)): f for f in to_scan}
 
         for future in as_completed(futures):

@@ -22,6 +22,15 @@
 {% for stack in stacks %}
 <a href="/stacks/{{ stack.id }}" style="text-decoration: none; color: inherit;">
     <div class="stack-card {% if stack.resolved %}resolved{% endif %}">
+        <div style="display: flex; gap: 4px; flex-shrink: 0;">
+            {% for thumb in stack.previews[:3] %}
+            <img src="/thumbnails/{{ thumb }}" alt=""
+                 style="width: 50px; height: 50px; object-fit: cover; border-radius: 4px;">
+            {% endfor %}
+            {% if not stack.previews %}
+            <div style="width: 50px; height: 50px; background: #eee; border-radius: 4px;"></div>
+            {% endif %}
+        </div>
         <span class="stack-type type-{{ stack.stack_type }}">
             {% if stack.stack_type == 'duplicate' %}Exact Duplicate
             {% elif stack.stack_type == 'lower_res' %}Lower Resolution

@@ -68,9 +68,12 @@ def add_image(file_path: str, filename: str, phash: str, width: int, height: int
     return row["id"]
 
 
-def get_all_images() -> list[dict]:
+def get_all_images(limit: int = 0, offset: int = 0) -> list[dict]:
     conn = get_db()
-    rows = conn.execute("SELECT * FROM images ORDER BY filename").fetchall()
+    if limit > 0:
+        rows = conn.execute("SELECT * FROM images ORDER BY filename LIMIT ? OFFSET ?", (limit, offset)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM images ORDER BY filename").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -82,15 +85,28 @@ def get_image(image_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def get_images_not_in_stacks() -> list[dict]:
+def get_images_not_in_stacks(limit: int = 0, offset: int = 0) -> list[dict]:
     conn = get_db()
-    rows = conn.execute("""
-        SELECT i.* FROM images i
+    query = """SELECT i.* FROM images i
         WHERE i.id NOT IN (SELECT image_id FROM stack_members)
-        ORDER BY i.filename
-    """).fetchall()
+        ORDER BY i.filename"""
+    if limit > 0:
+        query += " LIMIT ? OFFSET ?"
+        rows = conn.execute(query, (limit, offset)).fetchall()
+    else:
+        rows = conn.execute(query).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_unstacked_count() -> int:
+    conn = get_db()
+    row = conn.execute("""
+        SELECT COUNT(*) as cnt FROM images
+        WHERE id NOT IN (SELECT image_id FROM stack_members)
+    """).fetchone()
+    conn.close()
+    return row["cnt"]
 
 
 def get_image_count() -> int:
@@ -100,14 +116,30 @@ def get_image_count() -> int:
     return row["cnt"]
 
 
-def search_images(query: str) -> list[dict]:
+def search_images(query: str, limit: int = 0, offset: int = 0) -> list[dict]:
     conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM images WHERE filename LIKE ? ORDER BY filename",
-        (f"%{query}%",),
-    ).fetchall()
+    if limit > 0:
+        rows = conn.execute(
+            "SELECT * FROM images WHERE filename LIKE ? ORDER BY filename LIMIT ? OFFSET ?",
+            (f"%{query}%", limit, offset),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM images WHERE filename LIKE ? ORDER BY filename",
+            (f"%{query}%",),
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def search_images_count(query: str) -> int:
+    conn = get_db()
+    row = conn.execute(
+        "SELECT COUNT(*) as cnt FROM images WHERE filename LIKE ?",
+        (f"%{query}%",),
+    ).fetchone()
+    conn.close()
+    return row["cnt"]
 
 
 # --- Stacks ---
@@ -165,8 +197,22 @@ def get_all_stacks(include_resolved: bool = False) -> list[dict]:
         LEFT JOIN stack_members sm ON s.id = sm.stack_id
         {where}
         GROUP BY s.id
-        ORDER BY s.created_at DESC
+        ORDER BY COUNT(sm.image_id) DESC, s.created_at DESC
     """).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_stack_preview_images(stack_id: int, limit: int = 3) -> list[dict]:
+    """Get a few images from a stack for thumbnail preview."""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT i.file_path, i.filename FROM images i
+        JOIN stack_members sm ON i.id = sm.image_id
+        WHERE sm.stack_id = ?
+        ORDER BY i.width * i.height DESC
+        LIMIT ?
+    """, (stack_id, limit)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
