@@ -230,5 +230,30 @@ async function resetAll() {
     await fetch('/api/reset', {method: 'POST'});
     location.reload();
 }
+
+// On page load, check if scan or date estimation is already running
+async function checkRunningTasks() {
+    const scanResp = await fetch('/api/scan/status');
+    const scan = await scanResp.json();
+    if (scan.running) {
+        scanStartTime = Date.now() - (scan.total > 0 && scan.scanned > 0
+            ? (scan.scanned / scan.total) * scan.scanned * 1000 : 0);
+        document.getElementById('btn-scan').disabled = true;
+        document.getElementById('scan-progress').style.display = 'block';
+        pollInterval = setInterval(pollScan, 500);
+    }
+
+    const dateResp = await fetch('/api/date-estimate/status');
+    const date = await dateResp.json();
+    if (date.running) {
+        dateStartTime = Date.now() - (date.total > 0 && date.processed > 0
+            ? (date.processed / date.total) * date.processed * 1000 : 0);
+        document.getElementById('btn-date').disabled = true;
+        document.getElementById('date-progress').style.display = 'block';
+        datePollInterval = setInterval(pollDateEstimate, 1000);
+    }
+}
+
+checkRunningTasks();
 </script>
 {% endblock %}
