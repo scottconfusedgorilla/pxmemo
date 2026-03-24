@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Stack #{{ stack.id }}{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+    <a href="/stacks" style="font-size: 0.9rem;">&larr; Back to stacks</a>
+    <div class="spacer"></div>
+    <span class="stack-type type-{{ stack.stack_type }}">
+        {% if stack.stack_type == 'duplicate' %}Exact Duplicate
+        {% elif stack.stack_type == 'lower_res' %}Lower Resolution
+        {% else %}Manual Stack
+        {% endif %}
+    </span>
+</div>
+
+<div class="card">
+    <h2>{{ stack.label or 'Stack #' + stack.id|string }}</h2>
+    {% if stack.resolved %}
+    <div class="alert alert-success" style="margin-top: 8px;">
+        This stack has been resolved.
+        <button class="btn btn-outline btn-sm" style="margin-left: 12px;"
+                onclick="unresolve({{ stack.id }})">Re-open</button>
+    </div>
+    {% endif %}
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 16px;">
+        Click an image to select it as the "keeper". Then resolve the stack.
+    </p>
+
+    <div class="thumb-grid" id="thumb-grid">
+        {% for m in members %}
+        <div class="thumb-card {% if stack.keep_image_id == m.id %}keeper{% endif %}"
+             data-id="{{ m.id }}" onclick="selectKeeper({{ m.id }})">
+            {% if stack.keep_image_id == m.id %}
+            <span class="thumb-badge badge-keeper">Keep</span>
+            {% endif %}
+            {% if m.thumb %}
+            <img src="/thumbnails/{{ m.thumb }}" alt="{{ m.filename }}">
+            {% else %}
+            <div style="width:200px;height:200px;display:flex;align-items:center;justify-content:center;background:#eee;color:#999;font-size:0.8rem;">No preview</div>
+            {% endif %}
+            <div class="thumb-meta">
+                <div class="name" title="{{ m.filename }}">{{ m.filename }}</div>
+                <div>{{ m.width }}&times;{{ m.height }} &middot; {{ (m.file_size / 1024)|round(0)|int }} KB</div>
+                {% if m.exif_date %}<div>{{ m.exif_date[:10] }}</div>{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div style="margin-top: 20px; display: flex; gap: 12px; flex-wrap: wrap;">
+        {% if not stack.resolved %}
+        <button class="btn btn-success" id="btn-resolve" onclick="resolveStack({{ stack.id }})">
+            Resolve Stack
+        </button>
+        {% endif %}
+        <button class="btn btn-outline" onclick="addImageModal()">Add Image to Stack</button>
+        <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this stack?')) deleteStack({{ stack.id }})">
+            Delete Stack
+        </button>
+    </div>
+</div>
+
+<!-- Add Image Modal -->
+<div class="modal-overlay" id="add-modal">
+    <div class="modal">
+        <h3>Add Image to Stack</h3>
+        <input type="search" id="image-search" placeholder="Search by filename..."
+               oninput="searchImages(this.value)">
+        <div id="image-results" style="margin-top: 12px; max-height: 400px; overflow-y: auto;"></div>
+        <div style="margin-top: 16px; text-align: right;">
+            <button class="btn btn-outline" onclick="closeModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let selectedKeeper = {{ stack.keep_image_id or 'null' }};
+
+function selectKeeper(imageId) {
+    selectedKeeper = imageId;
+    document.querySelectorAll('.thumb-card').forEach(el => {
+        el.classList.remove('keeper');
+        el.querySelector('.thumb-badge')?.remove();
+    });
+    const card = document.querySelector(`[data-id="${imageId}"]`);
+    card.classList.add('keeper');
+    const badge = document.createElement('span');
+    badge.className = 'thumb-badge badge-keeper';
+    badge.textContent = 'Keep';
+    card.prepend(badge);
+}
+
+async function resolveStack(stackId) {
+    if (!selectedKeeper) return alert('Click an image to select the keeper first.');
+    await fetch(`/api/stacks/${stackId}/resolve`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({keep_image_id: selectedKeeper})
+    });
+    location.reload();
+}
+
+async function unresolve(stackId) {
+    await fetch(`/api/stacks/${stackId}/unresolve`, {method: 'POST'});
+    location.reload();
+}
+
+async function deleteStack(stackId) {
+    await fetch(`/api/stacks/${stackId}`, {method: 'DELETE'});
+    location.href = '/stacks';
+}
+
+function addImageModal() {
+    document.getElementById('add-modal').classList.add('active');
+    document.getElementById('image-search').focus();
+}
+
+function closeModal() {
+    document.getElementById('add-modal').classList.remove('active');
+}
+
+async function searchImages(q) {
+    if (q.length < 2) { document.getElementById('image-results').innerHTML = ''; return; }
+    const resp = await fetch(`/images?q=${encodeURIComponent(q)}&filter=all`);
+    const html = await resp.text();
+    // Parse out just the image cards from the response
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const grid = doc.querySelector('.image-grid');
+    if (grid) {
+        // Replace onclick to add-to-stack behavior
+        document.getElementById('image-results').innerHTML = grid.innerHTML;
+        document.querySelectorAll('#image-results .thumb-card').forEach(card => {
+            card.onclick = async function() {
+                const imgId = this.dataset.id;
+                await fetch(`/api/stacks/{{ stack.id }}/add`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({image_id: parseInt(imgId)})
+                });
+                closeModal();
+                location.reload();
+            };
+        });
+    }
+}
+
+// Close modal on overlay click
+document.getElementById('add-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+</script>
+{% endblock %}

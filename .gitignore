@@ -5,6 +5,7 @@ __pycache__/
 *.db
 server/uploads/
 server/thumbnails/
+stacker/thumbnails/
 .venv/
 client/build/
 client/dist/

@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Home{% endblock %}
+
+{% block content %}
+<div class="stats">
+    <div class="stat">
+        <div class="number">{{ image_count }}</div>
+        <div class="label">Images Scanned</div>
+    </div>
+    <div class="stat">
+        <div class="number">{{ counts.pending }}</div>
+        <div class="label">Stacks to Review</div>
+    </div>
+    <div class="stat">
+        <div class="number">{{ counts.resolved }}</div>
+        <div class="label">Resolved</div>
+    </div>
+</div>
+
+<!-- Scan Section -->
+<div class="card">
+    <h2>Scan a Folder</h2>
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 12px;">
+        Point at a folder of scanned photos. The scanner will compute perceptual hashes and extract metadata.
+    </p>
+    <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <input type="text" id="scan-folder" placeholder="C:\Photos\Scans or /home/user/photos" style="flex:1;">
+        <button class="btn btn-primary" id="btn-scan" onclick="startScan()">Scan</button>
+    </div>
+    <div id="scan-progress" style="display:none;">
+        <div class="progress-bar">
+            <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+        </div>
+        <div id="scan-status" style="font-size: 0.85rem; color: var(--text-muted);"></div>
+    </div>
+    <div id="scan-result" style="display:none;" class="alert alert-success"></div>
+</div>
+
+<!-- Analyze Section -->
+<div class="card">
+    <h2>Find Duplicates</h2>
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 12px;">
+        After scanning, run analysis to auto-detect exact duplicates and resolution variants.
+    </p>
+    <button class="btn btn-primary" id="btn-analyze" onclick="runAnalysis()">Analyze</button>
+    <div id="analyze-result" style="display:none; margin-top: 12px;" class="alert alert-success"></div>
+</div>
+
+<!-- Date Estimation Section -->
+<div class="card">
+    <h2>Date Estimation</h2>
+    <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 12px;">
+        Uses CLIP to visually estimate the era of scanned photos. Runs on a random sample.
+    </p>
+    <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 12px;">
+        <label style="font-size: 0.85rem;">Sample:</label>
+        <input type="number" id="sample-pct" value="1" min="0.1" max="100" step="0.5"
+               style="width: 80px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius);">
+        <span style="font-size: 0.85rem; color: var(--text-muted);">%</span>
+        <button class="btn btn-primary" id="btn-date" onclick="startDateEstimate()">Estimate Dates</button>
+    </div>
+    <div id="date-progress" style="display:none;">
+        <div class="progress-bar">
+            <div class="progress-fill" id="date-progress-fill" style="width: 0%"></div>
+        </div>
+        <div id="date-status" style="font-size: 0.85rem; color: var(--text-muted);"></div>
+    </div>
+    <div id="date-result" style="display:none;" class="alert alert-success"></div>
+</div>
+
+<!-- Quick Actions -->
+<div class="card">
+    <h2>Quick Actions</h2>
+    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+        <a href="/stacks" class="btn btn-outline">Review Stacks</a>
+        <a href="/images" class="btn btn-outline">Browse Images</a>
+        <a href="/api/export" class="btn btn-outline">Export CSV</a>
+        <button class="btn btn-danger btn-sm" onclick="if(confirm('Reset all data?')) resetAll()">Reset All</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let pollInterval = null;
+
+async function startScan() {
+    const folder = document.getElementById('scan-folder').value.trim();
+    if (!folder) return alert('Enter a folder path');
+
+    document.getElementById('btn-scan').disabled = true;
+    document.getElementById('scan-progress').style.display = 'block';
+    document.getElementById('scan-result').style.display = 'none';
+
+    const resp = await fetch('/api/scan', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({folder})
+    });
+    const data = await resp.json();
+    if (data.error) {
+        alert(data.error);
+        document.getElementById('btn-scan').disabled = false;
+        return;
+    }
+
+    pollInterval = setInterval(pollScan, 500);
+}
+
+async function pollScan() {
+    const resp = await fetch('/api/scan/status');
+    const s = await resp.json();
+
+    if (s.total > 0) {
+        const pct = Math.round((s.scanned / s.total) * 100);
+        document.getElementById('progress-fill').style.width = pct + '%';
+        document.getElementById('scan-status').textContent =
+            `${s.scanned} / ${s.total} — ${s.current_file}`;
+    }
+
+    if (!s.running && s.result) {
+        clearInterval(pollInterval);
+        document.getElementById('scan-progress').style.display = 'none';
+        const r = s.result;
+        if (r.error) {
+            document.getElementById('scan-result').className = 'alert alert-warning';
+            document.getElementById('scan-result').textContent = 'Error: ' + r.error;
+        } else {
+            document.getElementById('scan-result').className = 'alert alert-success';
+            document.getElementById('scan-result').textContent =
+                `Done! Scanned ${r.scanned} images (${r.errors} errors).`;
+        }
+        document.getElementById('scan-result').style.display = 'block';
+        document.getElementById('btn-scan').disabled = false;
+        // Reload stats
+        setTimeout(() => location.reload(), 1000);
+    }
+}
+
+async function runAnalysis() {
+    document.getElementById('btn-analyze').disabled = true;
+    document.getElementById('btn-analyze').textContent = 'Analyzing...';
+    const resp = await fetch('/api/analyze', {method: 'POST'});
+    const data = await resp.json();
+    const el = document.getElementById('analyze-result');
+    el.textContent = `Found ${data.duplicate_stacks} duplicate stacks, ${data.lower_res_stacks} resolution variant stacks, ${data.near_duplicate_stacks} near-duplicate stacks.`;
+    el.style.display = 'block';
+    document.getElementById('btn-analyze').disabled = false;
+    document.getElementById('btn-analyze').textContent = 'Analyze';
+    setTimeout(() => location.reload(), 1500);
+}
+
+let datePollInterval = null;
+
+async function startDateEstimate() {
+    const pct = parseFloat(document.getElementById('sample-pct').value) || 1.0;
+    document.getElementById('btn-date').disabled = true;
+    document.getElementById('date-progress').style.display = 'block';
+    document.getElementById('date-result').style.display = 'none';
+
+    const resp = await fetch('/api/date-estimate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({sample_pct: pct})
+    });
+    const data = await resp.json();
+    if (data.error) {
+        alert(data.error);
+        document.getElementById('btn-date').disabled = false;
+        return;
+    }
+    datePollInterval = setInterval(pollDateEstimate, 1000);
+}
+
+async function pollDateEstimate() {
+    const resp = await fetch('/api/date-estimate/status');
+    const s = await resp.json();
+
+    if (s.total > 0) {
+        const pct = Math.round((s.processed / s.total) * 100);
+        document.getElementById('date-progress-fill').style.width = pct + '%';
+        document.getElementById('date-status').textContent =
+            `${s.processed} / ${s.total} — ${s.current_file}`;
+    }
+
+    if (!s.running && s.result) {
+        clearInterval(datePollInterval);
+        document.getElementById('date-progress').style.display = 'none';
+        const r = s.result;
+        if (r.error) {
+            document.getElementById('date-result').className = 'alert alert-warning';
+            document.getElementById('date-result').textContent = 'Error: ' + r.error;
+        } else {
+            document.getElementById('date-result').className = 'alert alert-success';
+            document.getElementById('date-result').innerHTML =
+                `Estimated dates for ${r.sampled} of ${r.total_images} images (${r.sample_pct}% sample). ` +
+                `<a href="/date-results">View results</a>`;
+        }
+        document.getElementById('date-result').style.display = 'block';
+        document.getElementById('btn-date').disabled = false;
+    }
+}
+
+async function resetAll() {
+    await fetch('/api/reset', {method: 'POST'});
+    location.reload();
+}
+</script>
+{% endblock %}

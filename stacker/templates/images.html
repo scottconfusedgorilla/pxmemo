@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Images{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+    <h2>Images</h2>
+    <div class="spacer"></div>
+    <div style="display: flex; gap: 8px; align-items: center;">
+        <input type="search" id="search-input" placeholder="Search filenames..."
+               value="{{ query }}" style="width: 240px;"
+               onkeydown="if(event.key==='Enter') doSearch()">
+        <button class="btn btn-outline btn-sm" onclick="doSearch()">Search</button>
+    </div>
+    <select onchange="location.href='/images?filter=' + this.value" style="padding: 6px 10px; border-radius: var(--radius); border: 1px solid var(--border); font-size: 0.85rem;">
+        <option value="all" {% if filter == 'all' %}selected{% endif %}>All images</option>
+        <option value="unstacked" {% if filter == 'unstacked' %}selected{% endif %}>Not in any stack</option>
+    </select>
+</div>
+
+{% if not images %}
+<div class="alert alert-info">
+    No images found. <a href="/">Scan a folder</a> to get started.
+</div>
+{% else %}
+<p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">
+    {{ images|length }} images
+    {% if selected_ids is defined and selected_ids|length > 0 %} · {{ selected_ids|length }} selected{% endif %}
+</p>
+
+<!-- Manual stack creation -->
+<div id="selection-bar" style="display:none; margin-bottom: 16px; padding: 12px; background: var(--amber-light); border-radius: var(--radius);">
+    <span id="sel-count">0</span> selected &mdash;
+    <input type="text" id="stack-label" placeholder="Stack label (optional)" style="width: 220px; display: inline-block;">
+    <button class="btn btn-primary btn-sm" onclick="createManualStack()">Create Stack</button>
+    <button class="btn btn-outline btn-sm" onclick="clearSelection()">Clear</button>
+</div>
+
+<div class="image-grid">
+    {% for img in images %}
+    <div class="thumb-card" data-id="{{ img.id }}" onclick="toggleSelect(this, {{ img.id }})">
+        {% if img.thumb %}
+        <img src="/thumbnails/{{ img.thumb }}" alt="{{ img.filename }}">
+        {% else %}
+        <div style="width:100%;height:160px;display:flex;align-items:center;justify-content:center;background:#eee;color:#999;font-size:0.8rem;">No preview</div>
+        {% endif %}
+        <div class="thumb-meta">
+            <div class="name" title="{{ img.filename }}">{{ img.filename }}</div>
+            <div>{{ img.width }}&times;{{ img.height }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+const selected = new Set();
+
+function toggleSelect(el, id) {
+    if (selected.has(id)) {
+        selected.delete(id);
+        el.classList.remove('selected');
+    } else {
+        selected.add(id);
+        el.classList.add('selected');
+    }
+    updateSelectionBar();
+}
+
+function updateSelectionBar() {
+    const bar = document.getElementById('selection-bar');
+    document.getElementById('sel-count').textContent = selected.size;
+    bar.style.display = selected.size > 0 ? 'block' : 'none';
+}
+
+function clearSelection() {
+    selected.clear();
+    document.querySelectorAll('.thumb-card.selected').forEach(el => el.classList.remove('selected'));
+    updateSelectionBar();
+}
+
+async function createManualStack() {
+    if (selected.size < 2) return alert('Select at least 2 images.');
+    const label = document.getElementById('stack-label').value.trim();
+    const resp = await fetch('/api/stacks', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            stack_type: 'manual',
+            label: label || null,
+            image_ids: Array.from(selected)
+        })
+    });
+    const data = await resp.json();
+    if (data.stack_id) {
+        location.href = `/stacks/${data.stack_id}`;
+    }
+}
+
+function doSearch() {
+    const q = document.getElementById('search-input').value.trim();
+    location.href = '/images?q=' + encodeURIComponent(q);
+}
+</script>
+{% endblock %}

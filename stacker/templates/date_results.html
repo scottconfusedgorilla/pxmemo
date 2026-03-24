@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title_suffix %} — Date Estimates{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+    <a href="/" style="font-size: 0.9rem;">&larr; Home</a>
+    <h2 style="margin-left: 12px;">Date Estimation Results</h2>
+</div>
+
+{% if date_state.running %}
+<div class="alert alert-info">
+    Estimation in progress: {{ date_state.processed }} / {{ date_state.total }} images...
+</div>
+{% elif not result or not result.results %}
+<div class="alert alert-info">
+    No results yet. <a href="/">Run a date estimation</a> from the home page.
+</div>
+{% else %}
+<div class="card">
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px;">
+        Sampled {{ result.sampled }} of {{ result.total_images }} images ({{ result.sample_pct }}%).
+        Showing CLIP's best guess for the era of each photo.
+    </p>
+
+    <!-- Decade distribution summary -->
+    <h3 style="margin-bottom: 12px;">Distribution</h3>
+    {% set ns = namespace(decades={}) %}
+    {% for r in result.results if r.top_decade is defined %}
+        {% if r.top_decade in ns.decades %}
+            {% set _ = ns.decades.update({r.top_decade: ns.decades[r.top_decade] + 1}) %}
+        {% else %}
+            {% set _ = ns.decades.update({r.top_decade: 1}) %}
+        {% endif %}
+    {% endfor %}
+    <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px;">
+        {% for decade, prompt in [("1920s",""), ("1930s",""), ("1940s",""), ("1950s",""), ("1960s",""), ("1970s",""), ("1980s",""), ("1990s",""), ("2000s",""), ("2010s",""), ("2020s","")] %}
+        {% set count = ns.decades.get(decade, 0) %}
+        {% if count > 0 %}
+        <div style="text-align: center; padding: 8px 14px; background: var(--amber-light); border-radius: var(--radius); min-width: 70px;">
+            <div style="font-weight: 700; color: var(--amber);">{{ count }}</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted);">{{ decade }}</div>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+
+    <!-- Individual results -->
+    <h3 style="margin-bottom: 12px;">Per-Image Results</h3>
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+        <thead>
+            <tr style="border-bottom: 2px solid var(--border); text-align: left;">
+                <th style="padding: 8px;">Filename</th>
+                <th style="padding: 8px;">Best Guess</th>
+                <th style="padding: 8px;">Confidence</th>
+                <th style="padding: 8px;">Top 3</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in result.results %}
+            {% if r.error is defined %}
+            <tr style="border-bottom: 1px solid var(--border); background: var(--red-light);">
+                <td style="padding: 8px;" title="{{ r.file_path }}">{{ r.filename }}</td>
+                <td style="padding: 8px;" colspan="3">Error: {{ r.error }}</td>
+            </tr>
+            {% else %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 8px;" title="{{ r.file_path }}">{{ r.filename }}</td>
+                <td style="padding: 8px; font-weight: 600;">{{ r.top_decade }}</td>
+                <td style="padding: 8px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="progress-bar" style="width: 80px; height: 12px; margin: 0;">
+                            <div class="progress-fill" style="width: {{ (r.top_score * 100)|round(0) }}%"></div>
+                        </div>
+                        {{ (r.top_score * 100)|round(1) }}%
+                    </div>
+                </td>
+                <td style="padding: 8px; color: var(--text-muted);">
+                    {% for s in r.all_scores[:3] %}
+                    {{ s.decade }} ({{ (s.score * 100)|round(1) }}%){% if not loop.last %}, {% endif %}
+                    {% endfor %}
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}
