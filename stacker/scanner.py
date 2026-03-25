@@ -55,7 +55,7 @@ def _process_single_image(fpath_str: str) -> dict:
         img.close()
         return {
             "status": "ok",
-            "file_path": fpath_str,
+            "file_path": os.path.normcase(fpath_str),
             "filename": fpath.name,
             "phash": phash,
             "width": width,
@@ -83,16 +83,16 @@ def scan_folder(folder_path: str, progress_callback=None) -> dict:
     if not folder.is_dir():
         raise ValueError(f"Not a valid directory: {folder_path}")
 
-    # Collect all image files first
+    # Collect all image files first (normalize paths to avoid case duplicates on Windows)
     image_files = []
     for root, _dirs, files in os.walk(folder):
         for fname in files:
             if Path(fname).suffix.lower() in IMAGE_EXTENSIONS:
-                image_files.append(Path(root) / fname)
+                image_files.append(os.path.normcase(str(Path(root) / fname)))
 
     # Load already-scanned paths from DB to skip
     existing = _get_scanned_paths()
-    to_scan = [f for f in image_files if str(f) not in existing]
+    to_scan = [f for f in image_files if os.path.normcase(f) not in existing]
     skipped = len(image_files) - len(to_scan)
 
     total = len(to_scan)
@@ -132,8 +132,8 @@ def scan_folder(folder_path: str, progress_callback=None) -> dict:
 
 
 def _get_scanned_paths() -> set[str]:
-    """Get set of file paths already in the database."""
+    """Get set of file paths already in the database (normalized for case-insensitive matching)."""
     conn = db.get_db()
     rows = conn.execute("SELECT file_path FROM images").fetchall()
     conn.close()
-    return {r["file_path"] for r in rows}
+    return {os.path.normcase(r["file_path"]) for r in rows}

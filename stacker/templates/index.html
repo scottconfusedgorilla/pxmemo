@@ -343,7 +343,8 @@ async function pollConsolidate() {
         } else {
             el.className = 'alert alert-success';
             el.innerHTML = `Consolidated in ${elapsed}: ${r.keepers} keepers, ${r.copied} unique, ${r.stacked} stacked, ${r.paired} paired. ` +
-                `${r.manifest_rows} rows in manifest. Total source: ${r.total_source}.`;
+                `${r.manifest_rows} rows in manifest. Total source: ${r.total_source}.<br>` +
+                `Sync: ${r.sync_skipped || 0} skipped, ${r.sync_moved || 0} moved, ${r.sync_copied || 0} copied, ${r.sync_deleted || 0} deleted.`;
         }
         el.style.display = 'block';
         document.getElementById('btn-consolidate').disabled = false;

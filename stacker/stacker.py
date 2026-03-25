@@ -65,6 +65,9 @@ def find_near_duplicates(progress_callback=None) -> dict:
     """Find images with similar (but not identical) pHashes.
     These are likely scans of the same photo with different settings.
 
+    Uses union-find for transitive grouping: if A~B and B~C, all three
+    end up in one stack even if A is not directly near C.
+
     Returns stats dict.
     """
     images = db.get_all_images()
@@ -75,33 +78,45 @@ def find_near_duplicates(progress_callback=None) -> dict:
     unstacked = [img for img in images if img["id"] not in existing and img["phash"]]
 
     total = len(unstacked)
-    paired = set()
-    groups = []
+
+    # Union-Find
+    parent: dict[int, int] = {img["id"]: img["id"] for img in unstacked}
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]  # path compression
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    # Compare all pairs, union near-matches
+    hashes = {img["id"]: imagehash.hex_to_hash(img["phash"]) for img in unstacked}
 
     for i, img_a in enumerate(unstacked):
-        if img_a["id"] in paired:
-            continue
-        ha = imagehash.hex_to_hash(img_a["phash"])
-        group = [img_a]
-
+        ha = hashes[img_a["id"]]
         for img_b in unstacked[i + 1:]:
-            if img_b["id"] in paired:
-                continue
-            hb = imagehash.hex_to_hash(img_b["phash"])
+            hb = hashes[img_b["id"]]
             dist = ha - hb
             if 0 < dist <= NEAR_THRESHOLD:
-                group.append(img_b)
-                paired.add(img_b["id"])
-
-        if len(group) >= 2:
-            groups.append(group)
-            paired.add(img_a["id"])
+                union(img_a["id"], img_b["id"])
 
         if progress_callback:
             progress_callback("near", i + 1, total)
 
+    # Collect groups from union-find
+    groups: dict[int, list[dict]] = defaultdict(list)
+    for img in unstacked:
+        root = find(img["id"])
+        groups[root].append(img)
+
     stacks_created = 0
-    for group in groups:
+    for group in groups.values():
+        if len(group) < 2:
+            continue
         ids = [img["id"] for img in group]
         db.create_stack("duplicate", label=f"Near match: {group[0]['filename']}", image_ids=ids)
         stacks_created += 1

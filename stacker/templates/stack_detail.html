@@ -6,7 +6,8 @@
     <a href="/stacks" style="font-size: 0.9rem;">&larr; Back to stacks</a>
     <div class="spacer"></div>
     <span class="stack-type type-{{ stack.stack_type }}">
-        {% if stack.stack_type == 'duplicate' %}Exact Duplicate
+        {% if stack.label and stack.label.startswith('Near match') %}Near Duplicate
+        {% elif stack.stack_type == 'duplicate' %}Exact Duplicate
         {% elif stack.stack_type == 'lower_res' %}Lower Resolution
         {% else %}Manual Stack
         {% endif %}

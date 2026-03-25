@@ -230,7 +230,7 @@ def get_stack_members(stack_id: int) -> list[dict]:
         SELECT i.* FROM images i
         JOIN stack_members sm ON i.id = sm.image_id
         WHERE sm.stack_id = ?
-        ORDER BY i.width * i.height DESC
+        ORDER BY (i.width * i.height) DESC, i.file_size DESC
     """, (stack_id,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
