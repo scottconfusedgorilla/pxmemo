@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 import imagehash
+import numpy as np
 
 import db
 
@@ -65,7 +66,8 @@ def find_near_duplicates(progress_callback=None) -> dict:
     """Find images with similar (but not identical) pHashes.
     These are likely scans of the same photo with different settings.
 
-    Uses union-find for transitive grouping: if A~B and B~C, all three
+    Uses vectorized numpy for fast Hamming distance computation, then
+    union-find for transitive grouping: if A~B and B~C, all three
     end up in one stack even if A is not directly near C.
 
     Returns stats dict.
@@ -78,13 +80,19 @@ def find_near_duplicates(progress_callback=None) -> dict:
     unstacked = [img for img in images if img["id"] not in existing and img["phash"]]
 
     total = len(unstacked)
+    if total < 2:
+        return {"near_duplicate_stacks": 0}
 
-    # Union-Find
-    parent: dict[int, int] = {img["id"]: img["id"] for img in unstacked}
+    # Convert hex pHash strings to uint64 array for vectorized comparison
+    ids = [img["id"] for img in unstacked]
+    hash_ints = np.array([int(img["phash"], 16) for img in unstacked], dtype=np.uint64)
+
+    # Union-Find (array-based for speed)
+    parent = np.arange(total, dtype=np.int32)
 
     def find(x: int) -> int:
         while parent[x] != x:
-            parent[x] = parent[parent[x]]  # path compression
+            parent[x] = parent[parent[x]]
             x = parent[x]
         return x
 
@@ -93,32 +101,44 @@ def find_near_duplicates(progress_callback=None) -> dict:
         if ra != rb:
             parent[ra] = rb
 
-    # Compare all pairs, union near-matches
-    hashes = {img["id"]: imagehash.hex_to_hash(img["phash"]) for img in unstacked}
+    # Byte-level popcount lookup table (0-255 -> bit count)
+    _popcount_lut = np.zeros(256, dtype=np.uint8)
+    for _i in range(256):
+        _popcount_lut[_i] = bin(_i).count('1')
 
-    for i, img_a in enumerate(unstacked):
-        ha = hashes[img_a["id"]]
-        for img_b in unstacked[i + 1:]:
-            hb = hashes[img_b["id"]]
-            dist = ha - hb
-            if 0 < dist <= NEAR_THRESHOLD:
-                union(img_a["id"], img_b["id"])
+    def hamming_one_vs_many(h: np.uint64, candidates: np.ndarray) -> np.ndarray:
+        """Compute Hamming distance between one hash and an array of hashes."""
+        xor = np.bitwise_xor(h, candidates)
+        # View as bytes, lookup popcount per byte, sum across 8 bytes
+        xor_bytes = xor.view(np.uint8).reshape(-1, 8)
+        return _popcount_lut[xor_bytes].sum(axis=1)
 
-        if progress_callback:
+    # Compare each image against all later images, vectorized
+    REPORT_INTERVAL = 500  # report progress every N images
+
+    for i in range(total - 1):
+        candidates = hash_ints[i + 1:]
+        dists = hamming_one_vs_many(hash_ints[i], candidates)
+
+        matches = np.where((dists > 0) & (dists <= NEAR_THRESHOLD))[0]
+        for m in matches:
+            union(i, i + 1 + m)
+
+        if progress_callback and (i % REPORT_INTERVAL == 0 or i == total - 2):
             progress_callback("near", i + 1, total)
 
     # Collect groups from union-find
     groups: dict[int, list[dict]] = defaultdict(list)
-    for img in unstacked:
-        root = find(img["id"])
+    for i, img in enumerate(unstacked):
+        root = find(i)
         groups[root].append(img)
 
     stacks_created = 0
     for group in groups.values():
         if len(group) < 2:
             continue
-        ids = [img["id"] for img in group]
-        db.create_stack("duplicate", label=f"Near match: {group[0]['filename']}", image_ids=ids)
+        group_ids = [img["id"] for img in group]
+        db.create_stack("duplicate", label=f"Near match: {group[0]['filename']}", image_ids=group_ids)
         stacks_created += 1
 
     return {"near_duplicate_stacks": stacks_created}
